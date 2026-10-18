@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sentence } from '../types';
 
 export default function SentenceCollector() {
@@ -8,6 +8,10 @@ export default function SentenceCollector() {
   const [category, setCategory] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editHighlights, setEditHighlights] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('sentences');
@@ -21,7 +25,7 @@ export default function SentenceCollector() {
   }, [sentences]);
 
   const handleWordClick = (word: string) => {
-    const cleanWord = word.replace(/[.,!?;:'"()]/g, '');
+    const cleanWord = word.replace(/[.,!?;:'"()\[\]{}]/g, '');
     if (!cleanWord) return;
     
     if (highlightedWords.includes(cleanWord)) {
@@ -52,15 +56,85 @@ export default function SentenceCollector() {
     setSentences(sentences.filter(s => s.id !== id));
   };
 
+  const handleEdit = (sentence: Sentence) => {
+    setEditingId(sentence.id);
+    setEditText(sentence.text);
+    setEditHighlights([...sentence.highlightedWords]);
+  };
+
+  const handleEditWordClick = (word: string) => {
+    const cleanWord = word.replace(/[.,!?;:'"()\[\]{}]/g, '');
+    if (!cleanWord) return;
+    
+    if (editHighlights.includes(cleanWord)) {
+      setEditHighlights(editHighlights.filter(w => w !== cleanWord));
+    } else {
+      setEditHighlights([...editHighlights, cleanWord]);
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingId || !editText.trim()) return;
+    setSentences(sentences.map(s => 
+      s.id === editingId 
+        ? { ...s, text: editText.trim(), highlightedWords: editHighlights }
+        : s
+    ));
+    setEditingId(null);
+    setEditText('');
+    setEditHighlights([]);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditText('');
+    setEditHighlights([]);
+  };
+
+  const handleExport = () => {
+    const data = JSON.stringify(sentences, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sentences-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string);
+        if (Array.isArray(imported)) {
+          const merged = [...imported, ...sentences];
+          // Remove duplicates by id
+          const unique = merged.filter((s, index, self) => 
+            index === self.findIndex(t => t.id === s.id)
+          );
+          setSentences(unique);
+        }
+      } catch {
+        alert('فایل نامعتبر است!');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const renderTextWithHighlights = (text: string, highlights: string[]) => {
     const words = text.split(/(\s+)/);
     return words.map((word, index) => {
-      const cleanWord = word.replace(/[.,!?;:'"()]/g, '');
+      const cleanWord = word.replace(/[.,!?;:'"()\[\]{}]/g, '');
       const isHighlighted = highlights.includes(cleanWord);
       return (
         <span
           key={index}
-          className={isHighlighted ? 'bg-yellow-300 dark:bg-yellow-600 px-0.5 rounded font-semibold' : ''}
+          className={isHighlighted ? 'bg-yellow-300 dark:bg-yellow-600 px-0.5 rounded font-semibold text-yellow-900 dark:text-yellow-100' : ''}
         >
           {word}
         </span>
@@ -71,7 +145,7 @@ export default function SentenceCollector() {
   const renderEditableText = (text: string) => {
     const words = text.split(/(\s+)/);
     return words.map((word, index) => {
-      const cleanWord = word.replace(/[.,!?;:'"()]/g, '');
+      const cleanWord = word.replace(/[.,!?;:'"()\[\]{}]/g, '');
       const isHighlighted = highlightedWords.includes(cleanWord);
       if (!cleanWord) return <span key={index}>{word}</span>;
       return (
@@ -80,7 +154,29 @@ export default function SentenceCollector() {
           onClick={() => handleWordClick(word)}
           className={`cursor-pointer transition-all duration-200 rounded px-0.5 ${
             isHighlighted
-              ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold shadow-sm'
+              ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold shadow-sm text-yellow-900 dark:text-yellow-100'
+              : 'hover:bg-blue-100 dark:hover:bg-blue-900'
+          }`}
+        >
+          {word}
+        </span>
+      );
+    });
+  };
+
+  const renderEditPreview = (text: string) => {
+    const words = text.split(/(\s+)/);
+    return words.map((word, index) => {
+      const cleanWord = word.replace(/[.,!?;:'"()\[\]{}]/g, '');
+      const isHighlighted = editHighlights.includes(cleanWord);
+      if (!cleanWord) return <span key={index}>{word}</span>;
+      return (
+        <span
+          key={index}
+          onClick={() => handleEditWordClick(word)}
+          className={`cursor-pointer transition-all duration-200 rounded px-0.5 ${
+            isHighlighted
+              ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold shadow-sm text-yellow-900 dark:text-yellow-100'
               : 'hover:bg-blue-100 dark:hover:bg-blue-900'
           }`}
         >
@@ -133,7 +229,7 @@ export default function SentenceCollector() {
         {currentText && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              روی کلمات مهم کلیک کنید (👆 Click important words):
+              روی کلمات مهم کلیک کنید 👆 Click important words:
             </label>
             <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl text-lg leading-relaxed text-gray-800 dark:text-white min-h-[60px]">
               {renderEditableText(currentText)}
@@ -174,7 +270,7 @@ export default function SentenceCollector() {
         </div>
       </div>
 
-      {/* Search & Filter */}
+      {/* Search, Filter & Export/Import */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <div className="flex-1 relative">
           <input
@@ -198,7 +294,68 @@ export default function SentenceCollector() {
             <option key={cat} value={cat}>{cat}</option>
           ))}
         </select>
+        <div className="flex gap-2">
+          <button
+            onClick={handleExport}
+            disabled={sentences.length === 0}
+            className="px-3 py-2 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 
+                       rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 transition-all text-sm font-medium
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            📥 Export
+          </button>
+          <label className="px-3 py-2 border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-400 
+                     rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all text-sm font-medium cursor-pointer">
+            📤 Import
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImport}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
+
+      {/* Edit Modal */}
+      {editingId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">✏️ Edit Sentence</h3>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              className="w-full p-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl
+                         focus:border-blue-500 outline-none resize-none
+                         bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white mb-3"
+              rows={3}
+            />
+            {editText && (
+              <div className="mb-4">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Click words to highlight:</p>
+                <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-xl text-base leading-relaxed text-gray-800 dark:text-white">
+                  {renderEditPreview(editText)}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleCancelEdit}
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sentences List */}
       <div className="space-y-4">
@@ -218,12 +375,20 @@ export default function SentenceCollector() {
                 <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-1 rounded-full">
                   {sentence.category || 'general'}
                 </span>
-                <button
-                  onClick={() => handleDelete(sentence.id)}
-                  className="text-red-400 hover:text-red-600 transition-colors text-sm"
-                >
-                  🗑️ Delete
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEdit(sentence)}
+                    className="text-blue-400 hover:text-blue-600 transition-colors text-sm"
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(sentence.id)}
+                    className="text-red-400 hover:text-red-600 transition-colors text-sm"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
               </div>
               <p className="text-lg text-gray-800 dark:text-white leading-relaxed mb-3">
                 {renderTextWithHighlights(sentence.text, sentence.highlightedWords)}
